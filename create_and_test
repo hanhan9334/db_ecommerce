@@ -1,0 +1,391 @@
+/*Drop all the table*/
+DROP TABLE order_items;  
+DROP TABLE orders;
+DROP TABLE inventories;
+DROP TABLE products;
+DROP TABLE employees;
+DROP TABLE contacts;
+DROP TABLE customers;
+DROP TABLE former_employees;
+
+/*create tables*/
+
+-- employees
+CREATE TABLE employees
+  (
+    employee_id NUMBER 
+                PRIMARY KEY,
+    first_name VARCHAR( 255 ) NOT NULL,
+    last_name  VARCHAR( 255 ) NOT NULL,
+    email      VARCHAR( 255 ) NOT NULL,
+    phone      VARCHAR( 50 ) NOT NULL ,
+    hire_date  DATE NOT NULL          ,
+    manager_id NUMBER( 12, 0 )        , -- fk
+    job_title  VARCHAR( 255 ) NOT NULL,
+    CONSTRAINT fk_employees_manager 
+        FOREIGN KEY( manager_id )
+        REFERENCES employees( employee_id )
+        ON DELETE CASCADE
+  );
+
+
+-- products 
+CREATE TABLE products
+  (
+    product_id NUMBER 
+               PRIMARY KEY,
+    product_name  VARCHAR2( 255 ) NOT NULL,
+    description   VARCHAR2( 2000 )        ,
+    standard_cost NUMBER( 9, 2 )          
+  );
+  
+-- customers
+CREATE TABLE customers
+  (
+    customer_id NUMBER 
+                PRIMARY KEY,
+    name         VARCHAR2( 255 ) NOT NULL,
+    address      VARCHAR2( 255 )         ,
+    website      VARCHAR2( 255 )         ,
+    credit_limit NUMBER( 8, 2 )
+  );
+  
+-- contacts
+CREATE TABLE contacts
+  (
+    contact_id NUMBER 
+               PRIMARY KEY,
+    first_name  VARCHAR2( 255 ) NOT NULL,
+    last_name   VARCHAR2( 255 ) NOT NULL,
+    email       VARCHAR2( 255 ) NOT NULL,
+    phone       VARCHAR2( 20 )          ,
+    customer_id NUMBER                  ,
+    CONSTRAINT fk_contacts_customers 
+      FOREIGN KEY( customer_id )
+      REFERENCES customers( customer_id ) 
+      ON DELETE CASCADE
+  );
+  
+-- orders 
+CREATE TABLE orders
+  (
+    order_id NUMBER 
+             PRIMARY KEY,
+    customer_id NUMBER( 6, 0 ) NOT NULL, -- fk
+    status      VARCHAR( 20 ) NOT NULL ,
+    employee_id NUMBER( 6, 0 )         , -- fk
+    order_date  DATE NOT NULL          ,
+    CONSTRAINT fk_orders_customers 
+      FOREIGN KEY( customer_id )
+      REFERENCES customers( customer_id )
+      ON DELETE CASCADE,
+    CONSTRAINT fk_orders_employees 
+      FOREIGN KEY( employee_id )
+      REFERENCES employees( employee_id ) 
+      ON DELETE SET NULL
+  );
+  
+-- order_items
+CREATE TABLE order_items
+  (
+    order_id   NUMBER( 12, 0 )                                , -- fk
+    product_id NUMBER( 12, 0 ) NOT NULL                       , -- fk
+    quantity   NUMBER( 8, 2 ) NOT NULL                        ,
+    unit_price NUMBER( 8, 2 ) NOT NULL                        ,
+    CONSTRAINT pk_order_items 
+      PRIMARY KEY( order_id ),
+    CONSTRAINT fk_order_items_products 
+      FOREIGN KEY( product_id )
+      REFERENCES products( product_id ) 
+      ON DELETE CASCADE,
+    CONSTRAINT fk_order_items_orders 
+      FOREIGN KEY( order_id )
+      REFERENCES orders( order_id ) 
+      ON DELETE CASCADE
+  );
+-- inventories
+CREATE TABLE inventories
+  (
+    product_id   NUMBER( 12, 0 )        , -- fk
+    quantity     NUMBER( 8, 0 ) NOT NULL,
+    CONSTRAINT pk_inventories 
+      PRIMARY KEY (product_id) ,
+    CONSTRAINT fk_inventories_products 
+      FOREIGN KEY( product_id )
+      REFERENCES products( product_id ) 
+      ON DELETE CASCADE
+  );
+  
+/*Sequences*/
+
+--drop SEQUENCEs
+
+DROP SEQUENCE employee_id_seq;
+DROP SEQUENCE product_id_seq;
+
+--sequence: employee_id
+CREATE SEQUENCE employee_id_seq
+INCREMENT BY 1
+START WITH 101
+MINVALUE 101
+MAXVALUE 999
+NOCACHE
+NOCYCLE;
+
+--sequence product_id:
+CREATE SEQUENCE product_id_seq
+INCREMENT BY 1
+START WITH 10001
+MINVALUE 10001
+MAXVALUE 19999
+NOCACHE
+NOCYCLE;
+
+
+/*Indexes*/
+
+-- drop indexes 
+
+DROP INDEX product_name_idx;
+DROP INDEX order_status_idx;
+
+--index on product_name
+CREATE INDEX product_name_idx
+ON products (product_name);
+
+--index on order id
+CREATE INDEX order_status_idx
+ON orders (status);
+
+/*Triggers*/
+
+--DROP triggers
+
+DROP TRIGGER employees_trg;
+DROP TRIGGER order_trg;
+DROP TABLE former_employees;
+-- Update former_employees table when a employee data is deleted from empoyees table
+CREATE TABLE former_employees
+(
+    employee_id NUMBER 
+                PRIMARY KEY,
+    first_name VARCHAR( 255 ) NOT NULL,
+    last_name  VARCHAR( 255 ) NOT NULL,
+    left_date DATE default SYSDATE
+);
+
+CREATE OR REPLACE TRIGGER employees_trg 
+BEFORE DELETE ON employees
+FOR EACH ROW
+BEGIN
+DBMS_OUTPUT.PUT_LINE('Employee: ' || :OLD.employee_first_name ||' ID: ' || :OLD.employee_id || ' is deleted');
+INSERT INTO former_employees
+(employee_id,first_name,last_name,left_date)
+VALUES
+(:OLD.employee_id, :OLD.first_name,:OLD.last_name,SYSDATE);
+END;
+/
+--Update inventories.quantity when a new order is placed
+CREATE OR REPLACE TRIGGER order_trg
+BEFORE INSERT ON order_items
+FOR EACH ROW
+BEGIN 
+UPDATE inventories
+SET inventories.quantity=:NEW.quantity
+WHERE inventories.product_id= :NEW.product_id;
+END;
+/
+/*Procedures*/
+
+--drop procedures
+
+DROP PROCEDURE total_quantity_sp;
+DROP PROCEDURE total_profit_sp;
+
+set serveroutput on size 30000;
+
+-- a procedure to calculate total quantity of everything sold
+CREATE OR REPLACE PROCEDURE total_quantity_sp
+IS
+    CURSOR cur_order_items IS
+    SELECT quantity
+    FROM order_items;
+    total_quantity NUMBER(6,0) :=0;
+    
+BEGIN
+    FOR r_order_items IN cur_order_items
+    LOOP
+        total_quantity := total_quantity + r_order_items.quantity;
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('Test of procedure 1:');
+    DBMS_OUTPUT.PUT_LINE('Total number of products sold: ' ||total_quantity);
+END;
+/
+
+-- a procedure to calculate profit of all orders
+CREATE OR REPLACE PROCEDURE total_profit_sp
+IS
+    CURSOR cur_order_items_products IS
+    SELECT quantity, unit_price, standard_cost
+    FROM order_items JOIN products 
+    USING (product_id);
+    total_profit NUMBER(8,0) :=0;
+BEGIN
+    FOR r_order_items_products in cur_order_items_products
+    LOOP
+        total_profit := total_profit + (r_order_items_products.unit_price-r_order_items_products.standard_cost)*r_order_items_products.quantity;
+    END LOOP;
+    DBMS_OUTPUT.PUT_LINE('Test of procedure 2:');
+    dbms_output.put_line('Total profit: ' || total_profit);
+END;
+/
+
+/*Function*/
+
+--DROP function
+DROP FUNCTION get_total_sales;
+
+/*a function to calculate sales on all products shipped in a specific year
+    
+    @param in_year PLS_INTEGER
+    @return 1_total_sales
+*/
+    
+CREATE OR REPLACE FUNCTION get_total_sales(
+    in_year PLS_INTEGER
+) 
+RETURN NUMBER
+IS
+    l_total_sales NUMBER := 0;
+BEGIN
+    -- get total sales
+    SELECT SUM(unit_price * quantity)
+    INTO l_total_sales
+    FROM order_items
+    INNER JOIN orders USING (order_id)
+    WHERE status = 'Shipped'
+    GROUP BY EXTRACT(YEAR FROM order_date)
+    HAVING EXTRACT(YEAR FROM order_date) = in_year;
+    
+    -- return the total sales
+    RETURN l_total_sales;
+END;
+/
+
+/*Insert data*/
+
+--employees table
+Insert into EMPLOYEES (EMPLOYEE_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,HIRE_DATE,MANAGER_ID,JOB_TITLE) values (employee_id_seq.NEXTVAL,'David','Pat','david@gmail.com','6471110000',to_date('01-DEC-15','DD-MON-RR'),null,'President');
+Insert into EMPLOYEES (EMPLOYEE_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,HIRE_DATE,MANAGER_ID,JOB_TITLE) values (employee_id_seq.NEXTVAL,'Jack','Lee','jack@gmail.com','6471110000',to_date('07-DEC-15','DD-MON-RR'),101,'Accounting Manager');
+Insert into EMPLOYEES (EMPLOYEE_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,HIRE_DATE,MANAGER_ID,JOB_TITLE) values (employee_id_seq.NEXTVAL,'Sum','Payne','sum@gmail.com','6471110000',to_date('07-JUN-16','DD-MON-RR'),102,'Accountant');
+Insert into EMPLOYEES (EMPLOYEE_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,HIRE_DATE,MANAGER_ID,JOB_TITLE) values (employee_id_seq.NEXTVAL,'Ave','Bob','ave@gmail.com','6471110000',to_date('07-JUN-17','DD-MON-RR'),102,'Accountant');
+Insert into EMPLOYEES (EMPLOYEE_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,HIRE_DATE,MANAGER_ID,JOB_TITLE) values (employee_id_seq.NEXTVAL,'Leo','Harris','leo@gmail.com','6471110000',to_date('01-NOV-17','DD-MON-RR'),101,'Sales Manager');
+Insert into EMPLOYEES (EMPLOYEE_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,HIRE_DATE,MANAGER_ID,JOB_TITLE) values (employee_id_seq.NEXTVAL,'Tony','Lu','tony@gmail.com','6471110000',to_date('13-JAN-18','DD-MON-RR'),105,'Sales Person');
+Insert into EMPLOYEES (EMPLOYEE_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,HIRE_DATE,MANAGER_ID,JOB_TITLE) values (employee_id_seq.NEXTVAL,'Tom','Quinn','tom@gmail.com','6471110000',to_date('13-MAR-18','DD-MON-RR'),105,'Sales Person');
+Insert into EMPLOYEES (EMPLOYEE_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,HIRE_DATE,MANAGER_ID,JOB_TITLE) values (employee_id_seq.NEXTVAL,'Prat','Abe','tony@gmail.com','6471110000',to_date('13-JAN-18','DD-MON-RR'),105,'Sales Person');
+Insert into EMPLOYEES (EMPLOYEE_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,HIRE_DATE,MANAGER_ID,JOB_TITLE) values (employee_id_seq.NEXTVAL,'Sue','Cathy','sue@gmail.com','6471110000',to_date('13-JAN-18','DD-MON-RR'),105,'Sales Person');
+Insert into EMPLOYEES (EMPLOYEE_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,HIRE_DATE,MANAGER_ID,JOB_TITLE) values (employee_id_seq.NEXTVAL,'Hunter','Bod','hunter@gmail.com','6471110000',to_date('13-AUG-17','DD-MON-RR'),101,'Marketing Manager');
+Insert into EMPLOYEES (EMPLOYEE_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,HIRE_DATE,MANAGER_ID,JOB_TITLE) values (employee_id_seq.NEXTVAL,'Pete','Nata','pete@gmail.com','6471110000',to_date('13-JAN-18','DD-MON-RR'),105,'Marketing Assistant');
+
+--products table
+Insert into PRODUCTS (PRODUCT_ID,PRODUCT_NAME,DESCRIPTION,STANDARD_COST) values (product_id_seq.NEXTVAL,'Intel Xeon E5-2699 V3 (OEM/Tray)','Speed:2.3GHz,Cores:18,TDP:145W',300);
+Insert into PRODUCTS (PRODUCT_ID,PRODUCT_NAME,DESCRIPTION,STANDARD_COST) values (product_id_seq.NEXTVAL,'Intel Xeon E5-2697 V3','Speed:2.6GHz,Cores:14,TDP:145W',330);
+Insert into PRODUCTS (PRODUCT_ID,PRODUCT_NAME,DESCRIPTION,STANDARD_COST) values (product_id_seq.NEXTVAL,'Intel Xeon E5-2698 V3 (OEM/Tray)','Speed:2.3GHz,Cores:16,TDP:135W',340);
+Insert into PRODUCTS (PRODUCT_ID,PRODUCT_NAME,DESCRIPTION,STANDARD_COST) values (product_id_seq.NEXTVAL,'Intel Xeon E5-2697 V4','Speed:2.3GHz,Cores:18,TDP:145W',350);
+Insert into PRODUCTS (PRODUCT_ID,PRODUCT_NAME,DESCRIPTION,STANDARD_COST) values (product_id_seq.NEXTVAL,'Intel Xeon E5-2685 V3 (OEM/Tray)','Speed:2.6GHz,Cores:12,TDP:120W',370);
+Insert into PRODUCTS (PRODUCT_ID,PRODUCT_NAME,DESCRIPTION,STANDARD_COST) values (product_id_seq.NEXTVAL,'Intel Xeon E5-2695 V3 (OEM/Tray)','Speed:2.3GHz,Cores:14,TDP:120W',400);
+Insert into PRODUCTS (PRODUCT_ID,PRODUCT_NAME,DESCRIPTION,STANDARD_COST) values (product_id_seq.NEXTVAL,'Intel Xeon E5-2697 V2','Speed:2.7GHz,Cores:12,TDP:130W',420);
+Insert into PRODUCTS (PRODUCT_ID,PRODUCT_NAME,DESCRIPTION,STANDARD_COST) values (product_id_seq.NEXTVAL,'Intel Xeon E5-2695 V4','Speed:2.1GHz,Cores:18,TDP:120W',450);
+Insert into PRODUCTS (PRODUCT_ID,PRODUCT_NAME,DESCRIPTION,STANDARD_COST) values (product_id_seq.NEXTVAL,'Intel Xeon E5-2695 V2','Speed:2.4GHz,Cores:12,TDP:115W',500);
+Insert into PRODUCTS (PRODUCT_ID,PRODUCT_NAME,DESCRIPTION,STANDARD_COST) values (product_id_seq.NEXTVAL,'Intel Xeon E5-2643 V2 (OEM/Tray)','Speed:3.5GHz,Cores:6,TDP:130W',600);
+
+
+--customers table
+Insert into CUSTOMERS (CUSTOMER_ID,NAME,ADDRESS,CREDIT_LIMIT,WEBSITE) values (1,'Qualcomm','Piazza Svizzera, Milano, ',500,'http://www.qualcomm.com');
+Insert into CUSTOMERS (CUSTOMER_ID,NAME,ADDRESS,CREDIT_LIMIT,WEBSITE) values (2,'EMC','Via Delle Grazie 11, San Giminiano, ',700,'http://www.emc.com');
+Insert into CUSTOMERS (CUSTOMER_ID,NAME,ADDRESS,CREDIT_LIMIT,WEBSITE) values (3,'Time Warner Cable','1597 Legend St, Mysore, Kar',3700,'http://www.twc.com');
+Insert into CUSTOMERS (CUSTOMER_ID,NAME,ADDRESS,CREDIT_LIMIT,WEBSITE) values (4,'Northrop Grumman','1606 Sangam Blvd, New Delhi, ',5000,'http://www.northropgrumman.com');
+Insert into CUSTOMERS (CUSTOMER_ID,NAME,ADDRESS,CREDIT_LIMIT,WEBSITE) values (5,'Lear','2115 N Towne Ln Ne, Cedar Rapids, IA',500,'http://www.lear.com');
+Insert into CUSTOMERS (CUSTOMER_ID,NAME,ADDRESS,CREDIT_LIMIT,WEBSITE) values (6,'Facebook','5112 Sw 9Th St, Des Moines, IA',500,'http://www.facebook.com');
+Insert into CUSTOMERS (CUSTOMER_ID,NAME,ADDRESS,CREDIT_LIMIT,WEBSITE) values (7,'Supervalu','8989 N Port Washington Rd, Milwaukee, WI',500,'http://www.supervalu.com');
+Insert into CUSTOMERS (CUSTOMER_ID,NAME,ADDRESS,CREDIT_LIMIT,WEBSITE) values (8,'NextEra Energy','4715 Sprecher Rd, Madison, WI',600,'http://www.nexteraenergy.com');
+Insert into CUSTOMERS (CUSTOMER_ID,NAME,ADDRESS,CREDIT_LIMIT,WEBSITE) values (9,'PG Corp.','8600 W National Ave, Milwaukee, WI',700,'http://www.pge.com');
+Insert into CUSTOMERS (CUSTOMER_ID,NAME,ADDRESS,CREDIT_LIMIT,WEBSITE) values (10,'Goodyear Tire Rubber','600 N Broadway Fl 1, Milwaukee, WI',700,'http://www.goodyear.com');
+
+
+-- contacts table
+
+Insert into CONTACTS (CONTACT_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,CUSTOMER_ID) values (1,'Flor','Stone','flor.stone@raytheon.com','+1 317 123 4104',1);
+Insert into CONTACTS (CONTACT_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,CUSTOMER_ID) values (2,'Lavera','Emerson','lavera.emerson@plainsallamerican.com','+1 317 123 4111',2);
+Insert into CONTACTS (CONTACT_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,CUSTOMER_ID) values (3,'Fern','Head','fern.head@usfoods.com','+1 812 123 4115',3);
+Insert into CONTACTS (CONTACT_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,CUSTOMER_ID) values (4,'Shyla','Ortiz','shyla.ortiz@abbvie.com','+1 317 123 4126',4);
+Insert into CONTACTS (CONTACT_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,CUSTOMER_ID) values (5,'Jeni','Levy','jeni.levy@centene.com','+1 812 123 4129',5);
+Insert into CONTACTS (CONTACT_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,CUSTOMER_ID) values (6,'Matthias','Hannah','matthias.hannah@chs.net','+1 219 123 4136',6);
+Insert into CONTACTS (CONTACT_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,CUSTOMER_ID) values (7,'Matthias','Cruise','matthias.cruise@alcoa.com','+1 219 123 4138',7);
+Insert into CONTACTS (CONTACT_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,CUSTOMER_ID) values (8,'Meenakshi','Mason','meenakshi.mason@internationalpaper.com','+1 317 123 4141',8);
+Insert into CONTACTS (CONTACT_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,CUSTOMER_ID) values (9,'Christian','Cage','christian.cage@emerson.com','+1 219 123 4142',9);
+Insert into CONTACTS (CONTACT_ID,FIRST_NAME,LAST_NAME,EMAIL,PHONE,CUSTOMER_ID) values (10,'Charlie','Sutherland','charlie.sutherland@up.com','+1 317 123 4146',10);
+
+
+--order table
+
+
+Insert into ORDERS (ORDER_ID,CUSTOMER_ID,STATUS,EMPLOYEE_ID,ORDER_DATE) values (101,1,'Pending',107,to_date('17-NOV-16','DD-MON-RR'));
+Insert into ORDERS (ORDER_ID,CUSTOMER_ID,STATUS,EMPLOYEE_ID,ORDER_DATE) values (102,2,'Pending',107,to_date('20-FEB-17','DD-MON-RR'));
+Insert into ORDERS (ORDER_ID,CUSTOMER_ID,STATUS,EMPLOYEE_ID,ORDER_DATE) values (103,3,'Pending',107,to_date('03-JAN-17','DD-MON-RR'));
+Insert into ORDERS (ORDER_ID,CUSTOMER_ID,STATUS,EMPLOYEE_ID,ORDER_DATE) values (104,4,'Pending',108,to_date('15-OCT-17','DD-MON-RR'));
+Insert into ORDERS (ORDER_ID,CUSTOMER_ID,STATUS,EMPLOYEE_ID,ORDER_DATE) values (105,5,'Canceled',108,to_date('09-APR-17','DD-MON-RR'));
+Insert into ORDERS (ORDER_ID,CUSTOMER_ID,STATUS,EMPLOYEE_ID,ORDER_DATE) values (106,6,'Canceled',108,to_date('15-AUG-17','DD-MON-RR'));
+Insert into ORDERS (ORDER_ID,CUSTOMER_ID,STATUS,EMPLOYEE_ID,ORDER_DATE) values (107,7,'Canceled',109,to_date('01-DEC-16','DD-MON-RR'));
+Insert into ORDERS (ORDER_ID,CUSTOMER_ID,STATUS,EMPLOYEE_ID,ORDER_DATE) values (108,8,'Shipped',109,to_date('09-APR-15','DD-MON-RR'));
+Insert into ORDERS (ORDER_ID,CUSTOMER_ID,STATUS,EMPLOYEE_ID,ORDER_DATE) values (109,9,'Shipped',109,to_date('11-MAY-17','DD-MON-RR'));
+Insert into ORDERS (ORDER_ID,CUSTOMER_ID,STATUS,EMPLOYEE_ID,ORDER_DATE) values (110,10,'Shipped',109,to_date('03-DEC-16','DD-MON-RR'));
+
+
+--order_items table
+
+Insert into ORDER_ITEMS (ORDER_ID,PRODUCT_ID,QUANTITY,UNIT_PRICE) values (101,10001,132,369.99);
+Insert into ORDER_ITEMS (ORDER_ID,PRODUCT_ID,QUANTITY,UNIT_PRICE) values (102,10002,124,519.99);
+Insert into ORDER_ITEMS (ORDER_ID,PRODUCT_ID,QUANTITY,UNIT_PRICE) values (103,10003,92,500.74);
+Insert into ORDER_ITEMS (ORDER_ID,PRODUCT_ID,QUANTITY,UNIT_PRICE) values (104,10004,128,549.99);
+Insert into ORDER_ITEMS (ORDER_ID,PRODUCT_ID,QUANTITY,UNIT_PRICE) values (105,10005,106,509.99);
+Insert into ORDER_ITEMS (ORDER_ID,PRODUCT_ID,QUANTITY,UNIT_PRICE) values (106,10006,148,549.59);
+Insert into ORDER_ITEMS (ORDER_ID,PRODUCT_ID,QUANTITY,UNIT_PRICE) values (107,10007,127,659.99);
+Insert into ORDER_ITEMS (ORDER_ID,PRODUCT_ID,QUANTITY,UNIT_PRICE) values (108,10008,138,654.99);
+Insert into ORDER_ITEMS (ORDER_ID,PRODUCT_ID,QUANTITY,UNIT_PRICE) values (109,10009,117,798.26);
+Insert into ORDER_ITEMS (ORDER_ID,PRODUCT_ID,QUANTITY,UNIT_PRICE) values (110,10010,34,779.99);
+
+--inventories table
+Insert into INVENTORIES (PRODUCT_ID,QUANTITY) values (10001,1225);
+Insert into INVENTORIES (PRODUCT_ID,QUANTITY) values (10002,1253);
+Insert into INVENTORIES (PRODUCT_ID,QUANTITY) values (10003,1422);
+Insert into INVENTORIES (PRODUCT_ID,QUANTITY) values (10004,5123);
+Insert into INVENTORIES (PRODUCT_ID,QUANTITY) values (10005,3122);
+Insert into INVENTORIES (PRODUCT_ID,QUANTITY) values (10006,1523);
+Insert into INVENTORIES (PRODUCT_ID,QUANTITY) values (10007,1242);
+Insert into INVENTORIES (PRODUCT_ID,QUANTITY) values (10008,8123);
+Insert into INVENTORIES (PRODUCT_ID,QUANTITY) values (10009,1822);
+Insert into INVENTORIES (PRODUCT_ID,QUANTITY) values (10010,7123);
+
+/*Test trigger*/
+
+DELETE
+FROM employees
+WHERE first_name='Pete';
+
+
+/*Test procedures*/
+
+EXECUTE total_quantity_sp;
+
+EXECUTE total_profit_sp;
+
+
+/*Test functions*/
+DECLARE
+    l_sales_2017 NUMBER := 0;
+BEGIN
+    l_sales_2017 := get_total_sales (2017);
+    DBMS_OUTPUT.PUT_LINE('Test of function');
+    DBMS_OUTPUT.PUT_LINE('Sales 2017: ' || l_sales_2017);
+END;
